@@ -46,7 +46,7 @@ The proposed architecture is based on 2 packages:
 :::
 
 ::: {.column width="42%"}
-![Existing Architecture](images/GBS_architecture_asis.png)
+![Existing Architecture](GBS_architecture_asis.png)
 :::
 :::
  
