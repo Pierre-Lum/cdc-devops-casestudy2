@@ -1,0 +1,183 @@
+---
+title: "Data Engineer Application"
+subtitle: "CDC Biodiversity - Case Study 2"
+author: "Pierre Bodroux"
+format:
+  revealjs: 
+    theme: sky
+    text-align: center
+    slide-number: true
+    chalkboard: 
+      buttons: false
+    preview-links: auto
+---
+
+<style>
+    .reveal section p {
+    display: inline-block;
+    font-size: 0.6em;
+    line-height: 1.2em;
+    vertical-align: center;
+  }
+</style>
+
+## Context
+
+This document is part of the second case study for the recruitment process of a data engineer at CDC Biodiversity.
+
+Two elements will be discussed:  
+-  Architecture improvement  
+-  Code review and optimisation  
+
+## Architecture improvement
+
+::: columns
+::: {.column width="55%"}
+
+
+The proposed architecture is based on 2 packages:  
+
+- "GBStoolbox" package: or user package,  
+- "GBSdevelopment" package: or heart package.  
+
+:::
+
+::: {.column width="3%"}
+:::
+
+::: {.column width="42%"}
+![Existing Architecture](images/GBS_architecture_asis.png)
+:::
+:::
+ 
+ 
+
+
+## Constraints of the Case Study
+
+The suggestions should take into account the following elements:  
+- R is the technological reference. If any other technological choices than R are considered, this presentation would explain why this choice is considered.  
+- The proposed architecture should keep separated the source code which generates the impact factors (heart) from the users.  
+- Other GBS add-ons (R packages) with supplementary data exist and it should be possible to link them with user-filled input data.  
+- The new architecture should propose a web-interface replacing "Generic-assesment.Rmd" as defined in the roadmap.  
+- In the present model, outputs are synthetised and presented in MSA.km² only. The proposed architecture should be able to propose intermediary data (such as consumed water volumes by economic activities). The higher volume of data to be processed and associated memory issues should be addressed.  
+
+## Concepts {.r-fit-text}
+
+Assumptions:  
+- Breaking down the calculation to live event will make them happen more often but with smaller CPU needs.  
+- Calculation happening as we go will spread the CPU need over time.  
+- Use and pay for resources as they are needed: the computing and memory capabilities could be mutualised to use extra resources when needed, or possibly externalised to have important capacities when needed (virtual server third parties. Note: other consideration are to be taken into account, such as access fees, security, and a business case needs to be developed).  
+
+## Proposed architecture{.r-fit-text}
+
+The proposed architecture is based on the following elements:  
+- Front-end: user experience. Suggested package: Shiny or Flexdashboard.  
+- Back-end: data, services and other systems accesses.  
+- Pipeline: each operation is realised as soon as prerequisites are made available, making next step data available for process without requiring as much CPU. Suggested package: Targets.  
+- API: each service provides an API, simplifying coding, maintenance and tests. Suggested package: Plumber.  
+- Scalable architecture: manage resource for active projects only. Several technical possibilities: virtual servers managed internally. Virtual servers managed by a third party (AWS, Azure, ...). Physical server are to be avoided as there is no possibility to save on resources and/or scale up when needed.  
+
+
+## Break down the architecture in smaller components {.r-fit-text}
+
+1. User data filling interface: the user is not wrangling spreadsheets anymore, easier to retrieve and access information, authentication.   
+2. Data is stored on the server: security is centrally managed. Data is accessible for authorised persons/systems only. (Note: an offline version could be made available if it is a real need).  
+3. Data input control: The basic controls are performed at the time of input, and every time the data is modified. Spread the CPU load.  
+
+## Break down the architecture in smaller components {.r-fit-text}
+4. Business process calculation: each time a chunk of "business process data" is completed, the adequate service is called for calculation of kpis or intermediate results. The aim here is to have the smallest unit of calculation possible to spread the CPU Load.  
+
+Example: If a process A need 4 data input to perform a calculation and another process B 2 data input included in the process A, the process B will be evaluated even if all data of process A are not yet available. 
+
+5. Each result is calculated in the flow and stored. Recalculated only if underlying data is modified. Note: A business process is likely to be smaller than a scope for example.  
+
+## Break down the architecture in smaller components {.r-fit-text}
+6. Project progress: a live status is provided to the user and wider client as dashboard, based on: quantity of data managed, data input completion (breakdown per business processes), business process calculation completion, any available outputs.  
+7. Overall status: for GBS measure team, overview on all active projects and easy access to data to provide technical support. Have measurement of CPU/Memory usage for each project and can anticipate peak activity surge.  
+
+## Code review
+
+The following slides answer the question: review the existing code and provide some recommendations to reduce the computation time.
+
+2 solutions to explore:  
+- Degrade the resolution  
+- Break the initial raster in smaller virtual tiles  
+
+## Degrade the resolution
+::: panel-tabset
+### Concept
+
+This solution can be very effective depending on the extent of original rasters and their initial resolution.   
+It is however to apply with precautions as the render will lose some quality. Depending on the specific usages we will apply the result to, that solution might be adapted or not.  
+
+Note: this solution involves pre-processing time and loss of quality.  
+
+### Code  
+
+```{r, echo=TRUE}
+library(terra)  
+#major <- terra::rast("sources/Major_land_cover_palm_agroforestry_corrected.tif")  
+#major_lowr <- aggregate(major, fact = 100)  
+#res(major)  
+#res(major_lowr)  
+#system.time(plot (major))  
+#system.time(plot(major_lowr))  
+```
+The factor chosen can vary as well. In this example a factor 100 is certainly too important. However it helps demonstrate the point.
+:::
+
+## Break the initial raster in virtual tiles 
+
+::: panel-tabset
+### Concept
+
+Working in smaller raster will allow exponential processing time gains. However, when the original raster is very large and need to be processed as whole, it is not possible.    
+Another possibility is to break that raster in virtual tiles to allow the processing to be performed in the background on smaller parts. The system is managing the different parts as one file.  
+
+Note: this solution involves pre-processing time.  
+
+### Code
+
+```{r, echo=TRUE}
+library(terra)  
+# Load the file
+# major <- terra::rast("sources/Major_land_cover_palm_agroforestry_corrected.tif")  
+
+# Define the number of vertical and horizontal tiles  
+l <- 20  
+n <- 20  
+
+# Create the tile structure based on the initial raster size
+# m_part <- rast(ncols = n, nrows = l, 
+#               extent = ext(major))  
+# Give a name to the tiles  
+# filenamem_part <- paste0(tempfile(), "m_part_.tif")  
+# Note: use the temp folder (we don't need to physically keep the files)  
+
+# Creates l*n tiles for each file  
+# ffm_part <- makeTiles(major, m_part, filenamem_part)  
+
+# Get the spatial raster from the file  
+# temp_m_part <- vrt(ffm_part)  
+
+```
+temp_m_part is now usable as a whole raster.
+:::
+
+## Convert the result in a table
+
+```{r, echo = TRUE}
+# forestry_natural_rate_x_area <- GBS_dev_test2(temp_year_file_folder,
+#                                             Major_land_cover_palm_agroforestry_corrected,
+#                                             FLII_earth_resampled)
+# table_forestry_natural_rate_x_area <- as.data.frame(forestry_natural_rate_x_area, xy = TRUE)
+# head(table_forestry_natural_rate_x_area)
+```
+
+## Discussion
+
+- File flii_earth_resampled-001.tif seems to present a fault at line 17970, preventing the use of the above methods.     
+- Both methods needs to be tested against processing time. The gain made in processing of the function GBS_dev_test2 will be significant. However, this gain will be partly offset by the processing time of the aggregation and/or creation of virtual tiles. The final adjustment of aggregation factor will be looking at quality and time processing. The final adjustment of tiling will be looking at time processing only.  
+- These 2 solutions can be used simultaneously.  
+
